@@ -1,76 +1,24 @@
 package ru.yandex.practicum.mymarket.order.model;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
-import ru.yandex.practicum.mymarket.item.model.Item;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
 
-@Entity
-@Table(name = "order_items")
+@Table("order_items")
 public class OrderItem {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "order_id", nullable = false)
-    private Order order;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "item_id", nullable = false)
-    private Item item;
-
-    @Column(nullable = false)
-    private String title;
-
-    @Column(nullable = false)
-    private long price;
-
-    @Column(nullable = false)
-    private int quantity;
-
-    protected OrderItem() {
+    @Id @Column("id") private Long id;
+    @Column("order_id") private Long orderId;
+    @Column("item_id") private Long itemId;
+    @Column("title") private String title;
+    @Column("price") private long price;
+    @Column("quantity") private int quantity;
+    public OrderItem() {}
+    public OrderItem(long orderId, long itemId, String title, long price, int quantity) {
+        this.orderId = orderId; this.itemId = itemId; this.title = title; this.price = price; this.quantity = quantity;
     }
-
-    public OrderItem(Item item, int quantity) {
-        this.item = item;
-        this.title = item.getTitle();
-        this.price = item.getPrice();
-        this.quantity = quantity;
-    }
-
-    void assignTo(Order order) {
-        this.order = order;
-    }
-
-    public long getCost() {
-        return price * quantity;
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Item getItem() {
-        return item;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public long getPrice() {
-        return price;
-    }
-
-    public int getQuantity() {
-        return quantity;
-    }
+    public Long getId() { return id; }
+    public Long getItemId() { return itemId; }
+    public String getTitle() { return title; }
+    public long getPrice() { return price; }
+    public int getQuantity() { return quantity; }
 }
