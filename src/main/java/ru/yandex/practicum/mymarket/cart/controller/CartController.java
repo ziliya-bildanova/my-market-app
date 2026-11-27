@@ -6,35 +6,25 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import reactor.core.publisher.Mono;
 import ru.yandex.practicum.mymarket.cart.dto.CartAction;
-import ru.yandex.practicum.mymarket.cart.dto.CartDto;
 import ru.yandex.practicum.mymarket.cart.service.CartService;
 
 @Controller
 @RequestMapping("/cart/items")
 public class CartController {
-
-    private final CartService cartService;
-
-    public CartController(CartService cartService) {
-        this.cartService = cartService;
-    }
-
+    private final CartService cart;
+    public CartController(CartService cart) { this.cart = cart; }
     @GetMapping
-    public String getCart(Model model) {
-        return renderCart(model);
+    public Mono<String> getCart(Model model) {
+        return cart.getCart().map(value -> {
+            model.addAttribute("items", value.items()); model.addAttribute("total", value.total()); return "cart";
+        });
     }
-
     @PostMapping
-    public String changeCount(@RequestParam long id, @RequestParam CartAction action, Model model) {
-        cartService.changeItemCount(id, action);
-        return renderCart(model);
-    }
-
-    private String renderCart(Model model) {
-        CartDto cart = cartService.getCart();
-        model.addAttribute("items", cart.items());
-        model.addAttribute("total", cart.total());
-        return "cart";
+    public Mono<String> change(org.springframework.web.server.ServerWebExchange exchange, Model model) {
+        return exchange.getFormData().flatMap(form -> cart.changeItemCount(
+                Long.parseLong(form.getFirst("id")), CartAction.valueOf(form.getFirst("action"))))
+                .then(getCart(model));
     }
 }

@@ -6,30 +6,22 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import reactor.core.publisher.Mono;
 import ru.yandex.practicum.mymarket.order.service.OrderService;
 
 @Controller
 @RequestMapping("/orders")
 public class OrderController {
-
-    private final OrderService orderService;
-
-    public OrderController(OrderService orderService) {
-        this.orderService = orderService;
-    }
-
+    private final OrderService orders;
+    public OrderController(OrderService orders) { this.orders = orders; }
     @GetMapping
-    public String getOrders(Model model) {
-        model.addAttribute("orders", orderService.getOrders());
-        return "orders";
+    public Mono<String> getOrders(Model model) {
+        return orders.getOrders().collectList().map(found -> { model.addAttribute("orders", found); return "orders"; });
     }
-
     @GetMapping("/{id}")
-    public String getOrder(@PathVariable long id,
-                           @RequestParam(defaultValue = "false") boolean newOrder,
-                           Model model) {
-        model.addAttribute("order", orderService.getOrder(id));
-        model.addAttribute("newOrder", newOrder);
-        return "order";
+    public Mono<String> getOrder(@PathVariable long id, @RequestParam(defaultValue = "false") boolean newOrder, Model model) {
+        return orders.getOrder(id).map(order -> {
+            model.addAttribute("order", order); model.addAttribute("newOrder", newOrder); return "order";
+        });
     }
 }

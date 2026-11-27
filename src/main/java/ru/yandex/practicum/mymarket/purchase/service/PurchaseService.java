@@ -1,42 +1,34 @@
 package ru.yandex.practicum.mymarket.purchase.service;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import ru.yandex.practicum.mymarket.cart.model.CartItem;
+import reactor.core.publisher.Mono;
 import ru.yandex.practicum.mymarket.cart.repository.CartItemRepository;
+import ru.yandex.practicum.mymarket.item.repository.ItemRepository;
 import ru.yandex.practicum.mymarket.order.model.Order;
 import ru.yandex.practicum.mymarket.order.model.OrderItem;
+import ru.yandex.practicum.mymarket.order.repository.OrderItemRepository;
 import ru.yandex.practicum.mymarket.order.repository.OrderRepository;
 
 @Service
 public class PurchaseService {
-
-    private final CartItemRepository cartItemRepository;
-    private final OrderRepository orderRepository;
-
-    public PurchaseService(CartItemRepository cartItemRepository, OrderRepository orderRepository) {
-        this.cartItemRepository = cartItemRepository;
-        this.orderRepository = orderRepository;
+    private final CartItemRepository carts;
+    private final ItemRepository items;
+    private final OrderRepository orders;
+    private final OrderItemRepository lines;
+    public PurchaseService(CartItemRepository carts, ItemRepository items, OrderRepository orders, OrderItemRepository lines) {
+        this.carts = carts; this.items = items; this.orders = orders; this.lines = lines;
     }
-
-    /**
-     * Эмулирует покупку: создаёт заказ из корзины и очищает её.
-     *
-     * @return идентификатор заказа или пустой результат, если корзина пуста
-     */
     @Transactional
-    public Optional<Long> purchase() {
-        List<CartItem> cartItems = cartItemRepository.findAllByOrderByIdAsc();
-        if (cartItems.isEmpty()) {
-            return Optional.empty();
-        }
-        Order order = new Order(LocalDateTime.now());
-        cartItems.forEach(cartItem -> order.addItem(new OrderItem(cartItem.getItem(), cartItem.getQuantity())));
-        Order saved = orderRepository.save(order);
-        cartItemRepository.deleteAll(cartItems);
-        return Optional.of(saved.getId());
+    public Mono<Long> purchase() {
+        return carts.findAllByOrderByIdAsc().collectList().flatMap(cart -> {
+            if (cart.isEmpty()) return Mono.empty();
+            return orders.save(new Order(LocalDateTime.now())).flatMap(order ->
+                reactor.core.publisher.Flux.fromIterable(cart).concatMap(line -> items.findById(line.getItemId())
+                    .flatMap(item -> lines.save(new OrderItem(order.getId(), item.getId(), item.getTitle(),
+                            item.getPrice(), line.getQuantity())))).then(carts.deleteAll(cart))
+                    .thenReturn(order.getId()));
+        });
     }
 }

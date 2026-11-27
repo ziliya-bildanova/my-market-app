@@ -1,14 +1,12 @@
 package ru.yandex.practicum.mymarket.item.service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import ru.yandex.practicum.mymarket.cart.service.CartService;
 import ru.yandex.practicum.mymarket.item.dto.CatalogPageDto;
 import ru.yandex.practicum.mymarket.item.dto.ItemDto;
@@ -19,56 +17,40 @@ import ru.yandex.practicum.mymarket.item.model.Item;
 import ru.yandex.practicum.mymarket.item.repository.ItemRepository;
 
 @Service
-@Transactional(readOnly = true)
 public class ItemService {
+    private final ItemRepository items;
+    private final CartService cart;
+    public ItemService(ItemRepository items, CartService cart) { this.items = items; this.cart = cart; }
 
-    private static final int ROW_SIZE = 3;
-    private static final int MAX_PAGE_SIZE = 100;
-
-    private final ItemRepository itemRepository;
-    private final CartService cartService;
-
-    public ItemService(ItemRepository itemRepository, CartService cartService) {
-        this.itemRepository = itemRepository;
-        this.cartService = cartService;
-    }
-
-    public CatalogPageDto getCatalogPage(String search, SortType sort, int pageNumber, int pageSize) {
+    public Mono<CatalogPageDto> getCatalogPage(String search, SortType sort, int pageNumber, int pageSize) {
         int number = Math.max(pageNumber, 1);
-        int size = Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
-        Page<Item> page = findItems(search, PageRequest.of(number - 1, size, sort.toSort()));
-
-        Map<Long, Integer> counts = cartService.getItemCounts(page.map(Item::getId).getContent());
-        List<ItemDto> items = page.getContent().stream()
-                .map(item -> ItemDto.of(item, counts.getOrDefault(item.getId(), 0)))
-                .toList();
-
-        return new CatalogPageDto(splitIntoRows(items),
-                new PagingDto(size, number, page.hasPrevious(), page.hasNext()));
+        int size = List.of(2, 5, 10, 20, 50, 100).contains(pageSize) ? pageSize : 5;
+        Flux<Item> source = StringUtils.hasText(search) ? items.search("%" + search.strip().toLowerCase()
+                .replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%") : items.findAll();
+        Comparator<Item> comparator = switch (sort) {
+            case ALPHA -> Comparator.comparing(Item::getTitle, String.CASE_INSENSITIVE_ORDER).thenComparing(Item::getId);
+            case PRICE -> Comparator.comparingLong(Item::getPrice).thenComparing(Item::getId);
+            case NO -> Comparator.comparing(Item::getId);
+        };
+        return source.sort(comparator).skip((long) (number - 1) * size).take(size + 1L).collectList()
+            .flatMap(found -> {
+                boolean next = found.size() > size;
+                List<Item> page = found.subList(0, Math.min(size, found.size()));
+                return cart.getItemCounts(page.stream().map(Item::getId).toList()).map(counts -> {
+                    List<ItemDto> entries = page.stream().map(item -> ItemDto.of(item, counts.getOrDefault(item.getId(), 0))).toList();
+                    List<List<ItemDto>> rows = new ArrayList<>();
+                    for (int start = 0; start < entries.size(); start += 3) {
+                        List<ItemDto> row = new ArrayList<>(entries.subList(start, Math.min(start + 3, entries.size())));
+                        while (row.size() < 3) row.add(ItemDto.stub());
+                        rows.add(List.copyOf(row));
+                    }
+                    return new CatalogPageDto(rows, new PagingDto(size, number, number > 1, next));
+                });
+            });
     }
 
-    public ItemDto getItem(long id) {
-        Item item = itemRepository.findById(id).orElseThrow(() -> new ItemNotFoundException(id));
-        return ItemDto.of(item, cartService.getItemCount(id));
-    }
-
-    private Page<Item> findItems(String search, Pageable pageable) {
-        if (!StringUtils.hasText(search)) {
-            return itemRepository.findAll(pageable);
-        }
-        String text = search.strip();
-        return itemRepository.findByTitleContainingIgnoreCaseOrDescriptionContainingIgnoreCase(text, text, pageable);
-    }
-
-    private List<List<ItemDto>> splitIntoRows(List<ItemDto> items) {
-        List<List<ItemDto>> rows = new ArrayList<>();
-        for (int start = 0; start < items.size(); start += ROW_SIZE) {
-            List<ItemDto> row = new ArrayList<>(items.subList(start, Math.min(start + ROW_SIZE, items.size())));
-            while (row.size() < ROW_SIZE) {
-                row.add(ItemDto.stub());
-            }
-            rows.add(List.copyOf(row));
-        }
-        return List.copyOf(rows);
+    public Mono<ItemDto> getItem(long id) {
+        return items.findById(id).switchIfEmpty(Mono.error(new ItemNotFoundException(id)))
+                .flatMap(item -> cart.getItemCount(id).map(count -> ItemDto.of(item, count)));
     }
 }
