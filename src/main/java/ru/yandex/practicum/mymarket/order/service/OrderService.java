@@ -1,29 +1,21 @@
 package ru.yandex.practicum.mymarket.order.service;
 
-import java.util.List;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import ru.yandex.practicum.mymarket.order.dto.OrderDto;
 import ru.yandex.practicum.mymarket.order.exception.OrderNotFoundException;
+import ru.yandex.practicum.mymarket.order.repository.OrderItemRepository;
 import ru.yandex.practicum.mymarket.order.repository.OrderRepository;
 
 @Service
-@Transactional(readOnly = true)
 public class OrderService {
-
-    private final OrderRepository orderRepository;
-
-    public OrderService(OrderRepository orderRepository) {
-        this.orderRepository = orderRepository;
-    }
-
-    public List<OrderDto> getOrders() {
-        return orderRepository.findAllByOrderByIdAsc().stream().map(OrderDto::of).toList();
-    }
-
-    public OrderDto getOrder(long id) {
-        return orderRepository.findWithItemsById(id)
-                .map(OrderDto::of)
-                .orElseThrow(() -> new OrderNotFoundException(id));
+    private final OrderRepository orders;
+    private final OrderItemRepository lines;
+    public OrderService(OrderRepository orders, OrderItemRepository lines) { this.orders = orders; this.lines = lines; }
+    public Flux<OrderDto> getOrders() { return orders.findAllByOrderByIdDesc().concatMap(order -> getOrder(order.getId())); }
+    public Mono<OrderDto> getOrder(long id) {
+        return orders.findById(id).switchIfEmpty(Mono.error(new OrderNotFoundException(id)))
+                .flatMap(order -> lines.findByOrderIdOrderByIdAsc(id).collectList().map(found -> OrderDto.of(id, found)));
     }
 }

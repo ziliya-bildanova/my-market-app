@@ -6,10 +6,10 @@
 ## Технологии
 
 - Java 21, Maven
-- Spring Boot 4, Spring Web MVC, встроенный Tomcat
-- Spring Data JPA, Hibernate ORM, H2
+- Spring Boot 4, Spring WebFlux, встроенный Netty
+- Spring Data R2DBC, H2 (реактивный драйвер)
 - Thymeleaf, Bootstrap
-- JUnit 5, Spring TestContext Framework, Spring Boot Test, Mockito
+- JUnit 5, Spring Boot Test, WebTestClient, StepVerifier
 - Docker
 
 ## Возможности
@@ -49,14 +49,14 @@ java -jar target/my-market-app-0.0.1-SNAPSHOT.jar
 
 ```bash
 docker build -t my-market-app .
-docker run --rm -p 8080:8080 -v my-market-data:/app/data my-market-app
+docker run --rm -p 8080:8080 my-market-app
 ```
 
-Приложение будет доступно на <http://localhost:8080>. Данные хранятся в томе `my-market-data`.
+Приложение будет доступно на <http://localhost:8080>. По умолчанию данные хранятся в памяти и сбрасываются при перезапуске.
 
 ## Данные
 
-Приложение использует файловую базу H2. При локальном запуске она лежит в папке `data/` рядом с местом запуска.
+Приложение использует базу H2 в памяти через R2DBC. Для постоянного хранения можно заменить URL и драйвер на другую R2DBC-совместимую БД.
 Схема описана в `src/main/resources/db/schema.sql`, начальные товары в `src/main/resources/db/seed.sql`.
 Начальные товары добавляются, только если таблица товаров пуста.
 
@@ -85,15 +85,8 @@ title;description;imgPath;price
 ./mvnw test
 ```
 
-| Вид | Инструмент | Базовый класс |
-| --- | --- | --- |
-| Юнит-тесты сервисов | JUnit 5, Mockito | нет |
-| Веб-слой и шаблоны | `@WebMvcTest`, MockMvc | `AbstractWebMvcTest` |
-| Слой данных | `@DataJpaTest` | `AbstractDataJpaTest` |
-| Сквозные сценарии | `@SpringBootTest`, MockMvc | `AbstractIntegrationTest` |
-
-Конфигурация каждого вида тестов задана один раз в базовом классе, а `@DirtiesContext` не используется.
-Поэтому на весь прогон поднимаются три контекста Spring, и они берутся из кеша.
+Интеграционные сценарии запускаются на `@SpringBootTest` с `WebTestClient` и `StepVerifier`.
+Тесты используют один контекст Spring; состояние БД очищается перед каждым тестом без `@DirtiesContext`.
 
 ## Структура
 

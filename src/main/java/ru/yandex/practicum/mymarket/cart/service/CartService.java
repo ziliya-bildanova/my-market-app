@@ -1,72 +1,52 @@
 package ru.yandex.practicum.mymarket.cart.service;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Mono;
 import ru.yandex.practicum.mymarket.cart.dto.CartAction;
 import ru.yandex.practicum.mymarket.cart.dto.CartDto;
 import ru.yandex.practicum.mymarket.cart.model.CartItem;
 import ru.yandex.practicum.mymarket.cart.repository.CartItemRepository;
 import ru.yandex.practicum.mymarket.item.dto.ItemDto;
 import ru.yandex.practicum.mymarket.item.exception.ItemNotFoundException;
-import ru.yandex.practicum.mymarket.item.model.Item;
 import ru.yandex.practicum.mymarket.item.repository.ItemRepository;
 
 @Service
-@Transactional(readOnly = true)
 public class CartService {
+    private final CartItemRepository carts;
+    private final ItemRepository items;
+    public CartService(CartItemRepository carts, ItemRepository items) { this.carts = carts; this.items = items; }
 
-    private final CartItemRepository cartItemRepository;
-    private final ItemRepository itemRepository;
-
-    public CartService(CartItemRepository cartItemRepository, ItemRepository itemRepository) {
-        this.cartItemRepository = cartItemRepository;
-        this.itemRepository = itemRepository;
+    public Mono<CartDto> getCart() {
+        return carts.findAllByOrderByIdAsc().collectList().flatMap(lines ->
+            items.findAllById(lines.stream().map(CartItem::getItemId).toList()).collectMap(item -> item.getId())
+                .map(byId -> {
+                    List<ItemDto> result = lines.stream().map(line -> ItemDto.of(byId.get(line.getItemId()), line.getQuantity())).toList();
+                    return new CartDto(result, result.stream().mapToLong(item -> item.price() * item.count()).sum());
+                }));
     }
 
-    public CartDto getCart() {
-        List<ItemDto> items = cartItemRepository.findAllByOrderByIdAsc().stream()
-                .map(cartItem -> ItemDto.of(cartItem.getItem(), cartItem.getQuantity()))
-                .toList();
-        long total = items.stream().mapToLong(item -> item.price() * item.count()).sum();
-        return new CartDto(items, total);
+    public Mono<Map<Long, Integer>> getItemCounts(List<Long> ids) {
+        if (ids.isEmpty()) return Mono.just(Map.of());
+        return carts.findAll().filter(line -> ids.contains(line.getItemId()))
+                .collectMap(CartItem::getItemId, CartItem::getQuantity);
     }
 
-    public Map<Long, Integer> getItemCounts(Collection<Long> itemIds) {
-        return cartItemRepository.findByItemIdIn(itemIds).stream()
-                .collect(Collectors.toMap(cartItem -> cartItem.getItem().getId(), CartItem::getQuantity));
-    }
-
-    public int getItemCount(long itemId) {
-        return cartItemRepository.findByItemId(itemId).map(CartItem::getQuantity).orElse(0);
+    public Mono<Integer> getItemCount(long id) {
+        return carts.findByItemId(id).map(CartItem::getQuantity).defaultIfEmpty(0);
     }
 
     @Transactional
-    public void changeItemCount(long itemId, CartAction action) {
-        Item item = itemRepository.findById(itemId).orElseThrow(() -> new ItemNotFoundException(itemId));
-        switch (action) {
-            case PLUS -> increase(item);
-            case MINUS -> decrease(itemId);
-            case DELETE -> cartItemRepository.findByItemId(itemId).ifPresent(cartItemRepository::delete);
-        }
-    }
-
-    private void increase(Item item) {
-        cartItemRepository.findByItemId(item.getId()).ifPresentOrElse(
-                CartItem::increaseQuantity,
-                () -> cartItemRepository.save(new CartItem(item)));
-    }
-
-    private void decrease(long itemId) {
-        cartItemRepository.findByItemId(itemId).ifPresent(cartItem -> {
-            if (cartItem.isLastUnit()) {
-                cartItemRepository.delete(cartItem);
-            } else {
-                cartItem.decreaseQuantity();
-            }
-        });
+    public Mono<Void> changeItemCount(long id, CartAction action) {
+        return items.findById(id).switchIfEmpty(Mono.error(new ItemNotFoundException(id)))
+            .flatMap(item -> carts.findByItemId(id).flatMap(line -> {
+                if (action == CartAction.DELETE || (action == CartAction.MINUS && line.getQuantity() == 1))
+                    return carts.delete(line).thenReturn(line);
+                line.setQuantity(line.getQuantity() + (action == CartAction.PLUS ? 1 : -1));
+                return carts.save(line);
+            }).switchIfEmpty(Mono.defer(() -> action == CartAction.PLUS
+                    ? carts.save(new CartItem(id, 1)) : Mono.empty()))).then();
     }
 }
